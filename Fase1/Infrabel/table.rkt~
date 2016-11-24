@@ -1,0 +1,4 @@
+#lang racket
+(define make-table make-hash)
+(define get-element hash-ref)
+(define add-element hash-set!)

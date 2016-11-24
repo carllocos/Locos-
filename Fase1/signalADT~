@@ -1,0 +1,18 @@
+(define stop-state 'red)
+(define almost-stop-state 'orange)
+(define advance-state 'green)
+
+(define (signal-new id status)
+  (cons 'signal id status))
+
+(define (signal? any)
+  (and (pair? any)
+       (eq? (car any) 'signal)))
+
+stop?
+almost-stop?
+start?
+stop!
+almost-stop!
+start!
+signal-id

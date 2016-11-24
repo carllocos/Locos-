@@ -1,0 +1,6 @@
+(define (loco-new id)
+  (
+loco-id
+loco?
+loco-speed
+loco-speed

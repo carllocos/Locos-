@@ -1,0 +1,146 @@
+#lang racket
+
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*                                                                 *-*-
+;-*-*       Unweighted Graphs (Adjacency List Representation)         *-*-
+;-*-*                                                                 *-*-
+;-*-*                       Wolfgang De Meuter                        *-*-
+;-*-*                   2009  Software Languages Lab                  *-*-
+;-*-*                    Vrije Universiteit Brussel                   *-*-
+;-*-*                                                                 *-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+
+(require scheme/mpair)
+(provide new-unweighted-label-graph)
+
+
+(define set-cdr! set-mcdr!)
+(define cons mcons)
+(define car mcar)
+(define cdr mcdr)
+
+(define (new-weighted-label-graph order directed )
+  (define nr-of-edges 0)
+  (define node-labels (make-vector order #f))
+  (define storage (make-vector order '()))
+
+  (define (nr-of-edges! amount)
+    (set! nr-of-edges amount))
+
+  (define (label node-index)
+    (if (< node-index (vector-length node-labels))
+        (vector-ref node-labels node-index)
+        #f))
+  (define (label! node-index symbol)
+    (if (< node-index (vector-length node-labels))
+        (vector-set! node-labels node-index symbol)
+        #f))
+
+  (define (add-edge! from to symbol)
+   (define lists storage)
+   (define (insert-sorted to prev next! next symbol)
+     (cond 
+       ((or (null? next)
+            (> to (car (car next))))
+        (when (pair? prev)
+          (display (cdr prev)))
+        (next! prev (cons (cons to symbol) next))
+        #t)
+       ((= to (car (car next)))
+        #f)
+       (else
+        (insert-sorted to next set-cdr! (cdr next) symbol))))
+   (define (head-setter head) 
+     (lambda (ignore next)
+       (vector-set! lists head next)))
+   (when (insert-sorted to '() (head-setter from) (vector-ref lists from) symbol)
+     (nr-of-edges! (+ 1 nr-of-edges)))
+   (when (not directed)
+     (insert-sorted from '() (head-setter to) (vector-ref lists to) symbol)))
+  
+  (define (for-each-node proc)
+    (let iter-nodes ((node-index 0))
+      (proc node-index (vector-ref node-labels node-index))
+      (when (< (+ node-index 1) order)
+        (iter-nodes (+ node-index 1)))))
+
+  (define (adjacent? from to)
+   (define lists storage)
+   (let search-sorted
+     ((current (vector-ref lists from)))
+     (cond 
+       ((or (null? current)
+            (< (car (car current)) to))
+        #f)
+       ((= (car (car current)) to)
+        #t)
+       (else
+        (search-sorted (cdr current))))))
+
+  (define (delete-edge! from to)
+   (define lists storage)
+   (define (delete-sorted to prev next! next)
+     (cond
+       ((or (null? next)
+            (> to (car (car next))))
+        #f)
+       ((= to (car (car next)))
+        (next! prev (cdr next))
+        #t)
+       (else
+        (delete-sorted to next set-cdr! (cdr next)))))
+   (define (head-setter head) 
+     (lambda (ignore next)
+       (vector-set! lists head next)))
+   (when (delete-sorted to '() (head-setter from) (vector-ref lists from))
+     (nr-of-edges!  (- nr-of-edges 1)))     
+   (when (not directed)
+     (delete-sorted from '() (head-setter to) (vector-ref lists to))))
+
+  (define (for-each-edge from proc)
+    (define neighbours (vector-ref storage from))
+    (let iter-edges
+      ((edges neighbours))
+      (when (not (null? edges))
+        (proc (car (car edges)) (cdr (car edges)))
+        (iter-edges (cdr edges)))))
+
+  (define (display-graph)
+    (let loop ((ctr 0))
+      (when (< ctr (vector-length storage))
+        (display "node: ") (display ctr) (display "  label:") (display (vector-ref node-labels ctr))
+        (display "  ns: ") (display (vector-ref storage ctr)) (newline)
+        (loop (+ ctr 1)))))
+
+  (define (dispatch msg)
+    (cond ((eq? msg 'order) order)
+          ((eq? msg 'nr-of-edges) nr-of-edges)
+          ((eq? msg 'directed?) directed)
+          ((eq? msg 'label) label)
+          ((eq? msg 'label!) label!)
+          ((eq? msg 'for-each-node) for-each-node)
+          ((eq? msg 'for-each-edge) for-each-edge)
+          ((eq? msg 'add-edge!) add-edge!)
+          ((eq? msg 'delete-edge!) delete-edge!)
+          ((eq? msg 'adjacent?) adjacent?)
+          ((eq? msg 'display) (display-graph))
+          (else (error "uknown msg--graph"))))
+  dispatch)
+
+;(define g (new-unweighted-label-graph 4 #f))
+;((g 'label!) 2 'Gent)
+;((g 'label!) 1 'Brussel)
+;((g 'label!) 0 'Zaventem)
+;((g 'label!) 3 'Leuven)
+
+;((g 'add-edge!) 2 1 'Hey)
+;((g 'add-edge!) 1 0 'Wow)
+;((g 'add-edge!) 0 3 'Ha)
+;((g 'add-edge!) 1 3 'Lol)
+;(g 'display)
+;((g 'adjacent?) 2 1)
+;((g 'adjacent?) 2 3)
+;((g 'delete-edge!) 2 1)
+;(g 'display)
