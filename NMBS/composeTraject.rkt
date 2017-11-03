@@ -1,0 +1,160 @@
+#lang racket
+(require (prefix-in sp: Project/ExternLib/single-source))
+(require (prefix-in bg: Project/ExternLib/box-weighted-graph))
+(require (prefix-in rs: Project/SharedADTs/railsADT))
+(require (prefix-in rwm: Project/SharedADTs/railwaymodelADT))
+(provide new-traject
+         )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;They are 3 steps in making traject for a loco.
+;;1. male-list-tracks will make the fastest traject based on dijkstra. The traject might be not secure tho.
+;;2. correct-last track will make sure that a traject ends on a detection track.
+;;3. correct-switch: will solve the next problem.
+;; problem:
+;;                                            Lg (1)
+;;                                          /
+;;                                         /
+;;                                        /
+;;                                       /
+;;       detection       Loco           /
+;;  Wp-------------Nm------------------Bx
+;;                                      \
+;;                                       \  Loco
+;;                                        \
+;;                                         Gt (2)
+;;
+;;
+;;; If Loco would be between Nm-Bx and has to go to Lg-Bx there is no problem switch Bx has to be set at 1
+;;  But if Loco is between Bx-Gt and has to go to Lg-Bx there is a problem. Loco needs first to go to track Nm-Bx and then
+;;  turn around. For safety reasons loco will not turn around at Nm-Bx but at the nearest detection edge Wp-Nm. 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(define (new-traject rwm end loco)
+  (define list-tracks (make-list-tracks rwm loco end))
+  (if list-tracks
+      (correct-switchs rwm (correct-last-track rwm end list-tracks))
+      #f))
+
+
+
+
+(define (make-list-tracks rwm loco end)
+  (define g (rwm:get-graph rwm))
+
+  (define start-index (bg:node-index g (loco 'get-id-n1)))
+  (define end-index (bg:node-index g end))
+  (define paths (sp:dijkstra g start-index))
+  
+  (when(eq? '() (vector-ref paths end-index))
+    (set! start-index (bg:node-index g (loco 'get-id-n2)))
+    (set! paths (sp:dijkstra g start-index)))
+  (if (eq? '() (vector-ref paths end-index))
+      #f
+      (let loop((to-index end-index) (result '()))
+        (if (= to-index start-index)
+            (let ((first-track (car result))
+                  (track (rwm:get-track rwm (loco 'get-id-n1) (loco 'get-id-n2))))
+              (if (rs:same-track? first-track track)
+                  result
+                  (cons track result)))
+            (let*((from-index (vector-ref paths to-index))
+                  (from-id ((bg:node-box g from-index) 'get-id))
+                  (to-id ((bg:node-box g to-index) 'get-id))
+                  (track (rwm:get-track rwm from-id to-id)))                                                               
+                  (loop from-index (cons track result)))))))
+
+
+;if the list of tracks that represent the traject of a loco doesn't end on a track of the detection type we will add one
+(define (correct-last-track rwm end-id tracks)
+  (define g (rwm:get-graph rwm))
+  (define last (list-ref tracks (- (length tracks) 1)))
+  (if (rs:detection-type? last)
+      tracks
+      (let* ((end-index (bg:node-index g end-id))
+             (n1-id (last 'get-id-n1))
+             (n2-id (last 'get-id-n2))
+             (n1-index (bg:node-index g n1-id))
+             (n2-index (bg:node-index g n2-id))
+             (neighbour #f)
+             (track #f))
+        (bg:for-each-edge g
+                          end-index
+                          (lambda(neighbour-i box weight)
+                            (when (and (not (= neighbour-i n1-index))
+                                       (not (= neighbour-i n2-index)))
+                              (set! neighbour (bg:node-box g neighbour-i)))))
+        (append tracks
+                (list (rwm:get-track rwm end-id (neighbour 'get-id)))))))
+
+
+
+
+(define (correct-switchs rwm lst)
+
+  (if (>= (length lst) 3);minimum amount of tracks so there can be a correction
+      (let loop ((tracks (cdr lst)) (prev-track (car lst)) (result '()))
+        (if (null? tracks) 
+            (reverse (cons prev-track result))
+            (let*((current-track (car tracks))
+                  (switch (to-correct? rwm prev-track current-track)))
+              (if switch
+                  (let ((ts (tracks-until-detection rwm  (switch 'get-track-0)  prev-track)))
+                    (if ts
+                        (loop (cdr tracks) current-track (append ts result))
+                        #f))
+                  (loop (cdr tracks) current-track (cons prev-track result))))))
+      lst))
+
+
+(define (tracks-until-detection rwm cur-t prev-t )
+
+  (define (loop r prev cur)
+    (let ((next-t (get-next-track rwm cur prev)))
+      (if next-t
+        (if (rs:detection-type? next-t)
+            (let ((res (cons cur r)))
+              (append (reverse res) (cons next-t res)))
+            (loop (cons cur r) cur next-t))
+        #f)))
+
+  (define res (loop '() prev-t cur-t))
+  (if res
+      (reverse (cons prev-t res))
+      #f)
+  )
+
+(define (get-next-track rwm cur-t prev-t)
+  (define node-n1 (if (eq? (cur-t 'get-id-n1) (rs:node-in-common cur-t prev-t))
+                      (cur-t 'get-id-n2)
+                      (cur-t 'get-id-n1)))
+  (define neighbours (rwm:tracks-belonging-to-node rwm node-n1))
+  (cond ((= (length neighbours) 2)
+         (if (rs:same-track? cur-t (car neighbours))
+             (cadr neighbours)
+             (car neighbours)))
+        ((= (length neighbours) 1) #f) ;this case is when we reach the last track
+        (else ;the else case is when de node-n1 the middle node is from a switch. This node belongs to three tracks.
+         (let*((s (rwm:get-switch rwm node-n1))
+               (pos ((s 'which-track) cur-t)))
+           (if (or (= pos 1) (= pos 2))
+               (s 'get-track-0)
+               (s 'get-track-1))))));he we could have chose track-2. Doesn't matter.
+      
+
+            
+
+;return a switch if there is a correction to be done otherwise false
+(define (to-correct? rwm prev-t current-t)
+  (and (rs:switch-type? prev-t)
+       (rs:switch-type? current-t)
+       (let*((switch-id (rs:node-in-common prev-t current-t))
+             (switch (rwm:get-switch rwm switch-id)))
+         (if switch
+             (let((pos1 ((switch 'which-track) prev-t))
+                  (pos2 ((switch 'which-track) current-t)))
+               (if (or (= pos1 0) (= pos2 0))
+                   #f
+                   switch))
+             #f))))

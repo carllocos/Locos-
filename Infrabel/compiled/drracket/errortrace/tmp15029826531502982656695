@@ -1,0 +1,1 @@
+("6.10" ("7745f6a01bdafc81d5cb8591d184b99f83db11bd" . "736c1045eff7b65f1cdd151380e4bc64e7c964b1") (collects #"Fase1" #"Infrabel" #"UDP.rkt") (collects #"errortrace" #"errortrace-key.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

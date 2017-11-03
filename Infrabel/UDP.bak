@@ -1,0 +1,32 @@
+#lang racket
+(require (prefix-in sim: Fase1/Simulator/interface))
+(provide connect-with-Z21
+         stop-connection
+         loco-speed
+         change-loco-speed
+         change-switch-status
+         get-switch-status
+         detection-block-used)
+
+
+(define (connect-with-Z21 simulator?)
+  (sim:start-simulator))
+
+(define (stop-connection)
+  (sim:stop-simulator))
+
+
+(define (loco-speed id)
+  (sim:get-loco-speed id))
+
+(define (change-loco-speed id speed)
+  (sim:set-loco-speed! id speed))
+
+(define (change-switch-status id pos)
+  (sim:set-switch-position! id pos))
+
+(define (get-switch-status id)
+  (sim:get-switch-position id))
+
+(define (detection-block-used loco-id)
+  (sim:get-loco-detection-block loco-id))

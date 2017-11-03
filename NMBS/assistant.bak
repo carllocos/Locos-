@@ -1,0 +1,53 @@
+#lang racket
+
+(require (prefix-in ct: Project/NMBS/composeTraject))
+(require (prefix-in rwm: Project/SharedADTs/railwaymodelADT))
+(require (prefix-in p: Project/SharedADTs/packageADT))
+
+(provide new-assistant)
+
+(define (new-assistant file)
+  (define rwm (rwm:new-rwm file))
+
+  ;(rwm:display-rwm rwm)
+
+  (define (prepare-traject end loco-id)
+    (define l (rwm:get-loco rwm loco-id))
+    (and l
+         (let ((lst (ct:new-traject rwm end )))
+           (if lst
+               (map (lambda( t)
+                      (p:track (t 'get-id-n1) (t 'get-id-n2)))
+                    lst)
+               #f))))
+
+  (define (update-loco loco)
+    (let (( l (rwm:get-loco rwm (p:loco-id loco))))
+      ((l 'set-id-n1!) (p:loco-n1 loco))
+      ((l 'set-id-n2!) (p:loco-n2 loco))
+      ((l 'set-distance!) (p:loco-distance loco))))
+
+  (define (update-switch s-p)
+    (let (( s (rwm:get-switch rwm (p:switch-id s-p))))
+      ((s 'set-position!) (p:switch-pos s-p))))
+  
+  (define (update-signal signal)
+    (let (( s (rwm:get-signal rwm (p:signal-id signal))))
+      ((s 'set-status!) (p:signal-color signal))))
+
+  (define (update-rwm lst-to-update)
+    (let loop ((lst lst-to-update))
+      (unless (null? lst)
+        (cond ((p:signal? (car lst)) (update-signal (car lst)))
+              ((p:loco? (car lst)) (update-loco (car lst)))
+              ((p:switch? (car lst)) (update-switch (car lst))))
+        (loop (cdr lst)))))
+  
+  (define (dispatch cmd)
+    (cond ((eq? cmd 'new-traject) prepare-traject)
+          ((eq? cmd 'get-rwm) rwm)
+          ((eq? cmd 'update-rwm) update-rwm)
+          (else (error "unknown cmd-- Assistant: " cmd))))
+  dispatch)
+
+

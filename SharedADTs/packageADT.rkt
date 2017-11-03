@@ -1,0 +1,148 @@
+#lang racket
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Package ADT
+;;
+;; Package ADT represent the data that is send through the the TCP connection between NMBS and Infrabel
+;; based on a message and content.
+;; 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(provide EMPTY_CONTENT
+         package?
+         empty-content?
+         new
+         content
+         message
+
+         detection-track-package
+         detection?
+
+         track
+         track?
+         track-n1
+         track-n2
+        
+         switch-track?
+         switch-track
+        
+         loco-package
+         loco-id
+         loco-n1
+         loco-n2
+         loco-distance
+         loco?
+        
+         traject-package
+         traject-tracks
+         traject-loco
+
+         signal-package
+         signal?
+         signal-id
+         signal-color
+
+         switch-package
+         switch?
+         switch-id
+         switch-pos
+         )
+
+(define PACKAGE_LABEL 'package)
+
+(define EMPTY_CONTENT 'null)
+
+(define (package? any)
+  (and (pair? any)
+       (eq? (car any) PACKAGE_LABEL)))
+
+(define (empty-content? content)
+  (eq? content EMPTY_CONTENT))
+
+(define (new message content)
+  (list PACKAGE_LABEL message content))
+
+(define (message package)
+  (cadr package))
+
+(define (content package)
+  (caddr package))
+
+(define (traject-package loco-id tracks-package)
+  (cons loco-id tracks-package))
+
+(define (traject-loco p)
+  (car p))
+
+(define (traject-tracks p)
+  (cdr p))
+
+
+(define (detection-track-package id-n1 id-n2)
+  (list 'detection-track id-n1 id-n2))
+
+(define (detection? package)
+  (and (pair? package)
+       (eq? (car package) 'detection)))
+
+(define (track id-n1 id-n2)
+  (list 'track id-n1 id-n2))
+
+(define (track? package)
+  (and (pair? package)
+       (eq? (car package) 'track)))
+
+(define (track-n1 t)
+  (list-ref t 1))
+
+(define (track-n2 t)
+  (list-ref t 2))
+
+(define (switch-track? package)
+  (and (pair? package)
+       (eq? (car package) 'switch)))
+
+(define (switch-track id-n1 id-n2)
+  (list 'switch id-n1 id-n2))
+
+(define (loco-package id id-n1 id-n2 distance)
+  (list 'loco id id-n1 id-n2 distance))
+
+(define (loco? any)
+  (and (pair? any)
+       (eq? 'loco (car any))))
+(define (loco-id l)
+  (list-ref l 1))
+
+(define (loco-n1 l)
+  (list-ref l 2))
+
+(define (loco-n2 l)
+  (list-ref l 3))
+
+(define (loco-distance l)
+  (list-ref l 4))
+
+(define (signal-package id color)
+  (list 'signal id color))
+
+(define (signal? any)
+  (and (pair? any)
+       (eq? (car any) 'signal)))
+
+(define (signal-id sig)
+  (list-ref sig 1))
+
+(define (signal-color sig)
+  (list-ref sig 2))
+
+(define (switch-package id position)
+  (list 'switch id position))
+
+(define (switch? any)
+  (and (pair? any)
+       (eq? (car any) 'switch)))
+
+(define (switch-id s)
+  (list-ref s 1))
+
+(define (switch-pos s)
+  (list-ref s 2))

@@ -1,0 +1,138 @@
+#lang racket
+
+
+;;; RAILWAY MODEL ;;;
+;; ADT for a railway model, which can be read from
+;; a text file.
+
+; (require ...)
+
+(provide (struct-out position)
+         (struct-out loco)
+         mk-loco
+         
+         (struct-out node)
+         (struct-out switch)
+         (struct-out track)
+         (struct-out detection-block)
+         (struct-out rwm)
+         load-rwm
+         track-eqv?
+         find-db)
+
+
+;;; LOCOMOTIVE ;;;
+
+; A position is represented a track (n1 and n2
+; must correspond to a track but the direction may
+; be different), and the distance from n1 on the
+; track.
+(struct position (n1 n2 distance))
+
+; A locomotive is represented by an ID, a position
+; and a speed.
+; L
+(struct loco (id [position #:mutable] [speed #:mutable]))
+
+(define (mk-loco lid n1 n2)
+  (loco lid (position n1 n2 0) 0))
+
+
+
+;;; RAILWAY MODEL ;;;
+
+; N
+(struct node (id x y))
+; S
+(struct switch (middle-node n0 n1 n2 [mode #:mutable]))
+; T
+(struct track (n1 n2))
+; D
+(struct detection-block (id track))
+
+; A railway model is composed of 5 lists:
+; locomotives, nodes, swithes, tracks, and
+; detection blocks.
+(struct rwm (ls ns ss ts ds))
+
+; Reads a railway model from a text file.
+(define (load-rwm filename)
+  (let ([lines (map string-split (file->lines filename))]
+        [ls '()]
+        [ns '()]
+        [ss '()]
+        [ts '()]
+        [ds '()])
+
+    
+    (define lines (file->lines filename))
+    (define string-list (let loop ((p (- (length lines)1)) (result '()))
+                          (if (>= p 0)
+                              (loop (- p 1)
+                                    (append (string-split (list-ref lines p))
+                                            result))
+                              result)))
+    (define leng (length string-list))
+    (let loop ((position 0))
+      (when (< position leng)
+        
+        (let ((type  (string->symbol (list-ref string-list position))))
+          (case type
+            [(L) (let* ([lid (string->symbol (list-ref string-list (+ position 1)))]  
+                        [n1 (string->symbol (list-ref string-list (+ position 2)))]
+                        [n2 (string->symbol (list-ref string-list (+ position 3)))]
+                        [res (mk-loco lid n1 n2)])
+                 
+                   (set! ls (cons res ls))
+                   (loop (+ position 4)))]
+            [(N) (let* ([id (string->symbol (list-ref string-list (+ position 1)))] 
+                        [x (string->number (list-ref string-list (+ position 2)))]
+                        [y (string->number (list-ref string-list (+ position 3)))]
+                        [res (node id x y)])
+                 
+                   (set! ns (cons res ns))
+                   (loop (+ position 4)))]
+            [(S) (let* ([nm (string->symbol (list-ref string-list (+ position 1)))]  
+                        [n0 (string->symbol (list-ref string-list (+ position 2)))]
+                        [n1 (string->symbol (list-ref string-list (+ position 3)))]
+                        [n2 (string->symbol (list-ref string-list (+ position 4)))]
+                        [res (switch nm n0 n1 n2 1)])
+                  
+                   (set! ss (cons res ss))
+                   (loop (+ position 5)))]
+            [(T) (let* ([n1 (string->symbol (list-ref string-list (+ position 1)))] 
+                        [n2 (string->symbol (list-ref string-list (+ position 2)))]
+                        [res (track n1 n2)])
+                  
+                   (set! ts (cons res ts))
+                   (loop (+ position 3)))]
+            [(D) (let* ([id (string->symbol (list-ref string-list (+ position 1)))]    
+                        [n1 (string->symbol (list-ref string-list (+ position 2)))]
+                        [n2 (string->symbol (list-ref string-list (+ position 3)))]
+                        [res (detection-block id (track n1 n2))])
+                 
+                   (set! ds (cons res ds))
+                   (loop (+ position 4)))]))))
+    (rwm ls ns ss ts ds)))
+
+
+; Checks whether two tracks are equivalent.
+(define (track-eqv? t1 t2)
+  (or (and (eqv? (track-n1 t1) (track-n1 t2))
+           (eqv? (track-n2 t1) (track-n2 t2)))
+      (and (eqv? (track-n1 t1) (track-n2 t2))
+           (eqv? (track-n2 t1) (track-n1 t2)))))
+
+; Find a detection block in a railway model.
+(define (find-db rwm n1 n2)
+  (define d (findf (lambda (db)
+                     (let ([t1 (track n1 n2)]
+                           [t2 (detection-block-track db)])
+                       (track-eqv? t1 t2)))
+                   (rwm-ds rwm)))
+  (if d
+      (detection-block-id d)
+      #f))
+
+
+

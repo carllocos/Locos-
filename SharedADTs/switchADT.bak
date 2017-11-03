@@ -1,0 +1,100 @@
+#lang racket
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Switch ADT
+;;
+;; This ADT represent a switch in the trainwaymodel.
+;; Is composed by four spot ADT's ID's.
+;; Chaging the switch position will change the direction of the track
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(require (prefix-in rs: Project/Infrabel/railsADT))
+(provide new-switch
+         display-switch
+         )
+
+;Hulp procedure to find a switch id based on two tracks of the switch
+
+
+(define (display-switch s)
+  (displayln (string-append "switch nm:"
+                            (symbol->string (s 'get-id-mn))
+                            "  n0:"
+                            (symbol->string (s 'get-id-n0))
+                            "  n1:"
+                            (symbol->string (s 'get-id-n1))
+                            "  n2:"
+                            (symbol->string (s 'get-id-n2)))))
+
+
+(define (new-switch id-mn id-n0 id-n1 id-n2)
+  (define position-switch 1)
+  (define track0 '())
+  (define track1 '())
+  (define track2 '())
+  (define reserved-by #f)
+
+  (define (set-track-0! t)
+    (set! track0 t))
+  (define (set-track-1! t)
+    (set! track1 t))
+  (define (set-track-2! t)
+    (set! track2 t))
+  
+  (define (set-position! pos)
+    (displayln (string-append "switch ADT:"
+                              (symbol->string id-mn)
+                              " has been updated to pos: "
+                              (number->string pos)
+                              "  "
+                              (symbol->string id-mn)
+                              "->"
+                              (if (= pos 1)
+                                  (symbol->string id-n1)
+                                  (symbol->string id-n2))))
+    (set! position-switch pos))
+
+  ;This procedure will derive which track number the argument track is in the switch that it belongs to 
+  (define (which-track track)
+    (cond((rs:same-track? track track0) 0)
+         ((rs:same-track? track track1) 1)
+         ((rs:same-track? track track2) 2)
+         (else #f)))
+
+  (define (reserve! id)
+
+    (newline)
+    (display "switch ")
+    (display id-mn)
+    (display "has been reserved by:")
+    (display id)
+    (newline)
+    (set! reserved-by id))
+
+  (define (free!)
+
+    (newline)
+    (display "switch ")
+    (display id-mn)
+    (display "has been freed!")
+    (newline)
+    (set! reserved-by #f))
+  
+  (lambda(msg)
+    (cond((eq? msg 'get-id-mn) id-mn)
+         ((eq? msg 'get-id-n0) id-n0)
+         ((eq? msg 'get-id-n1) id-n1)
+         ((eq? msg 'get-id-n2) id-n2)
+         ((eq? msg 'get-track-0) track0)
+         ((eq? msg 'get-track-1) track1)
+         ((eq? msg 'get-track-2) track2)
+         ((eq? msg 'set-track-0!) set-track-0!)
+         ((eq? msg 'set-track-1!) set-track-1!)
+         ((eq? msg 'set-track-2!) set-track-2!)
+         ((eq? msg 'get-position) position-switch)
+         ((eq? msg 'set-position!) set-position!)
+         ((eq? msg 'which-track) which-track)
+         ((eq? msg 'reserve!) reserve!)
+         ((eq? msg 'free?) (not reserved-by))
+         ((eq? msg 'reserved-by?) reserved-by)
+         ((eq? msg 'free!) (free!))
+         (else (error "message-switch-unknown: " msg)))))

@@ -1,0 +1,176 @@
+#lang racket
+(provide new-todo
+         todo?
+         todo-msg
+         todo-bag
+
+         
+         make-bag
+
+         ;traject of the loco
+         bag-traject
+         
+         ;time waited in wait mode
+         increase-wait-time!
+         reset-wait-time!
+         loco-done-waiting?
+
+         ;time before we check delay with hardware loco/simulation loco
+         ;increase-time-delay!
+         reset-time-delay!
+         time-to-check-delay?
+
+
+         ;;;;;;;;;;todo messages and testers
+         check-safety-msg
+         rolling-msg
+         track-msg
+         detection-msg
+         destination-msg
+         traject-done-msg
+         safe-msg
+         wait-msg
+         
+         delay-hardware-msg
+         delay-logic-msg
+
+         safe-msg?
+         wait-msg?
+         delay-hardware-msg?
+         delay-logic-msg?
+         check-safety-msg?
+         traject-done-msg?
+         track-reached-msg?
+         loco-rolling-msg?
+         detection-reached-msg?
+         destination-reached-msg?
+
+         )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TODO ADT
+;;
+;; IS a ADT used by controller to keep track of what need to be done for each loco
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define todo-label 'todo-ADT)
+(define (new-todo msg  content)
+  (cons todo-label (cons msg content)))
+
+(define (todo? any)
+  (and (pair? any)
+       (eq? (car any) todo-label)))
+
+(define (todo-msg todo)
+  (car (cdr todo)))
+
+(define (todo-bag todo)
+  (cdr (cdr todo)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;To do messages
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define check-safety-msg 'check-safety)
+(define rolling-msg 'rolling)
+(define track-msg 'track-reached)
+(define detection-msg 'detection-reached)
+(define destination-msg 'destination-reached)
+(define traject-done-msg 'traject-done)
+(define safe-msg 'safe)
+(define wait-msg 'wait)
+(define delay-hardware-msg 'delay-hardware)
+(define delay-logic-msg 'delay-logic)
+
+(define (safe-msg? msg)
+  (eq? msg safe-msg))
+
+
+(define (wait-msg? msg)
+  (eq? msg wait-msg))
+
+(define (delay-hardware-msg? msg)
+  (eq? msg delay-hardware-msg))
+
+
+(define (delay-logic-msg? msg)
+  (eq? msg delay-logic-msg))
+
+
+(define (check-safety-msg? msg)
+  (eq? msg check-safety-msg))
+
+(define (traject-done-msg? msg)
+  (eq? msg traject-done-msg))
+
+(define (loco-rolling-msg? msg)
+  (eq? msg rolling-msg))
+
+(define (track-reached-msg? msg)
+  (eq? msg track-msg))
+
+(define (detection-reached-msg? msg)
+  (eq? msg detection-msg))
+
+(define (destination-reached-msg? msg)
+  (eq? msg destination-msg))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ADT Bag
+;;
+;;Keeps the information about a loco in use. Is the content of a todo ADT. Holds the next information:
+;;
+;;traject: the traject followed by the loco
+;;wait-time: time that loco waited in wait mode
+;;wait-time-before-check: the wait time before we check delay with hardware/simulator
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define WAIT_DELAY_TIME 15)
+(define WAIT_BUSY_TIME 30)
+
+(define (make-bag traject)
+  (vector traject 0 0))
+
+(define (bag-traject bag)
+  (vector-ref bag 0))
+
+
+(define(bag-wait-time bag)
+  (vector-ref bag 1))
+
+(define(bag-wait-time! bag t)
+  (vector-set! bag 1 t))
+
+(define (reset-wait-time! bag)
+  (vector-set! bag 1 0))
+
+(define (increase-wait-time! bag)
+  (bag-wait-time! bag (+ (bag-wait-time bag) 1)))
+
+(define (loco-done-waiting? bag)
+  (= (bag-wait-time bag) WAIT_BUSY_TIME))
+
+
+
+(define (bag-time-delay bag)
+  (vector-ref bag 2))
+
+(define(bag-time-delay! bag t)
+  (vector-set! bag 2 t))
+
+(define (reset-time-delay! bag)
+  (bag-time-delay! bag 0))
+
+;(define (increase-time-delay! bag)
+;  (bag-time-delay! bag (+ (bag-time-delay bag) 1)))
+
+(define (time-to-check-delay? bag)
+  (define t (bag-time-delay bag))
+  (if (= t WAIT_DELAY_TIME)
+      (begin (reset-time-delay! bag)
+             #t)
+      (begin (bag-time-delay! bag (+ t 1 ))
+             #f)))

@@ -1,1 +1,0 @@
-("6.3" ("7d2d80797352b759d8da04039d8cba4e3481b5d6" . "6221fb396a8bbec52a70982fb4fd2ac32b611d19") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt") (collects #"scheme" #"mpair.rkt"))

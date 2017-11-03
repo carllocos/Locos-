@@ -1,0 +1,233 @@
+#lang racket
+
+(require (prefix-in cc: Fase1/Infrabel/commandControl))
+(require (prefix-in tj: Fase1/NMBS/trajectADT))
+(require (prefix-in rwm: Fase1/Infrabel/railwaymodel))
+(require (prefix-in rs: Fase1/Infrabel/railsADT))
+(require (prefix-in nmbs: Fase1/NMBS/composeTraject))
+
+(provide reached-new-track
+         reached-new-detection
+         reserve-until-detection!
+         correct-delay!
+         switch?
+         use-simulation!
+         )
+
+(define simulation? #t)
+
+(define (use-simulation! s)
+  (set! simulation? s))
+
+(define normal-case 'normal-case)
+(define inverse-case 'inverse-case)
+
+(define (switch-case s prev current)
+  (displayln (string-append "switch-case: switch "
+                            (symbol->string (s 'get-id-mn))))
+  (let ((p1 ((s 'which-track) prev))
+        (p2 ((s 'which-track) current)))
+    (if (= 0 p1)
+        (begin (display "switch-case: normale case current track pos:")
+               (displayln p1)
+               normal-case)
+        (begin (display "switch-case: inverse case next track pos:")
+               (displayln p2)
+               inverse-case))))
+
+(define (update-switch! rwm  switch track)
+  (let ((new-position ((switch 'which-track) track)))
+    (if simulation?
+        (cc:change-switch! (switch 'get-id-mn) new-position)
+        (let ((hardware-id (rwm:switch-logic-id->switch-hardware-id (switch 'get-id-mn))))
+          
+          (displayln "BITCH:")
+          (displayln "logic id:")
+          (displayln (switch 'get-id-mn))
+          (displayln "HARDWARE ID:")
+          (displayln hardware-id)
+          (when hardware-id
+            (cc:change-switch! hardware-id new-position))))
+    ((switch 'set-position!) new-position)))
+       
+
+;;This procedure will check if there is a switch to be updated and update it
+(define (update-switchs! rwm traject)
+  (define cur (tj:current-track traject))
+  (define ts (tj:tracks-until-condition traject (lambda( t)
+                                              (and (rs:detection-type? t)
+                                                   (not (rs:same-track? t cur))))))
+  (define new-prev '())
+  (define new-lst '())
+
+  (define (update-references t lst)
+    (set! new-prev t)
+    (set! new-lst lst))
+  
+  (define (loop-inverse prev-t lst)
+    (if (null? lst)
+        (update-references '() '())
+        (let* ((current-t (car lst))
+               (s (switch? rwm prev-t current-t)))
+          (if s
+              (if (eq? (switch-case s prev-t current-t) inverse-case)
+                  (begin (loop-inverse current-t (cdr lst))
+                         (update-switch! rwm s prev-t))
+                  (update-references prev-t lst))
+              (update-references prev-t lst)))))
+    
+
+  (define (loop-update prev-t lst)
+    (unless (null? lst)
+      (let* ((current-t (car lst))
+             (s (switch? rwm prev-t current-t)))
+        (if s
+            (if (eq? (switch-case s prev-t current-t) normal-case)
+                (begin (update-switch! rwm s current-t)
+                       (loop-update current-t (cdr lst)))
+                (begin (loop-inverse prev-t lst)
+                       (unless (null? new-prev)
+                         (loop-update new-prev new-lst))))
+            (loop-update current-t (cdr lst))))))
+  
+  (loop-update (car ts) (cdr ts)))
+
+;the node bewteen the two tracks is onsidered as a switchid. Then asked for the swith corresponding to this id
+;procedure returns #f or a switch
+(define (switch? rwm track1 track2)
+  (if (and track1
+           track2
+           (rs:switch-type? track1)
+           (rs:switch-type? track2))
+      (let((switch-id (rs:node-in-common track1 track2)))
+        (and switch-id (rwm:get-switch rwm switch-id)))
+      #f))
+
+
+(define (reached-new-track rwm traject)
+  (define prev-prev-track (tj:previous-track traject))
+  (tj:advance! traject)
+  (define prev-track (tj:previous-track traject))
+  (prev-track 'free!)
+  
+  (when (rs:detection-type? prev-track)
+    (tj:previous-detection! traject prev-track)
+    (let((used-by (prev-track 'used-for-backtrack?)))
+      (when (eq? used-by (tj:traject-loco traject))
+        (prev-track 'free-backtrack-use!))))
+
+  ;test to free a switch
+  (define s (switch? rwm prev-prev-track prev-track))
+  (when s
+    (s 'free!))
+  
+  ;(update-switch! rwm traject)
+  )
+ 
+(define (reached-new-detection rwm traject)
+  (define prev-prev-track (tj:previous-track traject))
+  (tj:advance! traject)
+  (define prev-track (tj:previous-track traject))
+  (prev-track 'free!)
+  (tj:next-detection! traject)
+  
+  (define s (switch? rwm prev-prev-track prev-track))
+  (when s
+    (s 'free!))
+  )
+
+
+;This procedure will be called after the securityController established that its safe for the loco to continue riding until next detection.
+;The procedure will reserve all of the tracks untile we reach the next-detection
+(define (reserve-until-detection! rwm traject)
+  (let((current (tj:current-track traject))
+       (loco-id (tj:traject-loco traject))
+       (prev-t #f))
+    (tj:advance-until-condition traject
+                                (lambda(track)
+                                  (let ((s (switch? rwm prev-t track)))
+                                    (when s
+                                      ((s 'reserve!) loco-id))
+;                                    (when (and s
+;                                               (= ((s 'which-track) prev-t) 0))
+;                                      ((s 'reserve!) loco-id))
+                                    (set! prev-t track)
+                                    ((track 'reserve!) loco-id)
+                                  
+                                    (if (and (rs:detection-type? track)
+                                             (not (eq? (track 'get-id) (current 'get-id))))
+                                        #t
+                                        #f)))))
+ (update-switchs! rwm traject)
+  )
+
+
+(define (correct-delay! rwm loco traject id-new-current update-sig)
+  (define n-d (tj:next-detection traject))
+  (unless (eq? (n-d 'get-id) id-new-current)
+    (error (string-append "correct-delay! the new current-track"
+                            (symbol->string id-new-current)
+                            "isn't part of the traject")))
+  (define c (tj:current-track traject))
+  
+  (when (rs:detection-type? c)
+    (tj:previous-detection! traject c))
+
+  
+  (let loop ((prev-prev-t #f)
+             (prev-t (tj:previous-track traject)))
+    (let ((cur-t (tj:current-track traject)))
+      (when prev-t
+        (prev-t 'free!)
+        (when prev-prev-t
+          (let ((s (switch? rwm prev-prev-t prev-t)))
+            (when s
+              (s 'free!)))))
+      (unless (and (rs:detection-type? cur-t)
+                   (eq? (cur-t 'get-id) id-new-current))
+        
+          
+        (displayln "advance!")
+        (tj:advance! traject)
+        (update-sig rwm traject)
+        (loop prev-t cur-t)      
+        )))
+
+  (tj:next-detection! traject)
+  
+  (define new-p (tj:previous-track traject))
+  (define new-c (tj:current-track traject))
+  (define common (rs:node-in-common new-p new-c))
+
+
+  (define n2 (if (eq? common (new-c 'get-id-n1))
+                 (new-c 'get-id-n2)
+                 (new-c 'get-id-n1)))
+
+  ((loco 'set-id-n1!) (if (> (loco 'get-speed) 0)
+                          common
+                          n2))
+  ((loco 'set-id-n2!) (if (> (loco 'get-speed) 0)
+                          n2
+                          common))
+
+  (displayln "common:")
+  
+(displayln common)
+  ;(displayln "n1:")
+  ;(displayln n1)
+  (displayln "n2:")
+  (displayln n2)
+  
+  (displayln (loco 'get-id-n1))
+  (displayln " - ")
+  (displayln (loco 'get-id-n2))
+  )
+               
+      
+;  (when (rs:detection-type? c)
+;    (previous-detection! c))
+
+
+                                   
+                                                        

@@ -1,0 +1,43 @@
+L 1 A2 A3
+L 2 Nm Lg
+N Bx 500 500 
+
+N Mx 550 600 
+
+N A1 500 800
+ 
+N A2 450 900 
+
+N A3 550 900 
+
+N Lv 650 550 
+
+N Gk 800 600 
+
+N Lg 950 300 
+
+N Nm 700 200 
+
+N Gt 300 700 
+
+N Bg 200 800 
+
+N Os 100 850
+
+N Kr 150 600 
+S Bx Mx Lv Nm 
+
+S Mx Bx A1 Gt 
+
+S A1 Mx A2 A3 
+
+S Gt Mx Bg Kr 
+
+D 1 Lv Gk 
+
+D 2 Nm Lg
+D 3 A2 A3 
+
+D 4 Bg Os
+
+D 5 Os Kr

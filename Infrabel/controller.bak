@@ -1,0 +1,329 @@
+#lang racket
+
+;(require (prefix-in tc: Fase1/Infrabel/trajectController))
+;(require (prefix-in lc: Fase1/Infrabel/locosController))
+;(require (prefix-in sc: Fase1/Infrabel/securityController))
+
+(require (prefix-in tc: Fase1/Infrabel/trajectController2))
+(require (prefix-in lc: Fase1/Infrabel/locosController2))
+(require (prefix-in sc: Fase1/Infrabel/securityController2))
+(require (prefix-in rw: Fase1/Infrabel/railwaymodel))
+(require (prefix-in tb: Fase1/MyLib/table))
+(require (prefix-in td: Fase1/Infrabel/TodoADT))
+;(require (prefix-in rs: Fase1/Infrabel/railsADT))
+(require (prefix-in q: Fase1/MyLib/queue-linked))
+(require (prefix-in tj: Fase1/NMBS/trajectADT))
+(require (prefix-in cc: Fase1/Infrabel/commandControl))
+(require scheme/mpair)
+(provide new-controller)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ADT Bag
+;;
+;;Small ADT to keep information about a loco in use.
+;;traject: the traject followed by the loco
+;;wait-time: time that loco waited in wait mode
+;;update: a list op things that have been updated due to the displacement of this loco
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (make-bag traject)
+  (vector traject 0 '() 0))
+
+(define (bag-traject bag)
+  (vector-ref bag 0))
+
+(define(bag-wait-time bag)
+  (vector-ref 1))
+
+(define (bag-update-lst bag)
+  (vector-ref bag 2))
+
+(define (bag-wait-check-delay bag)
+  (vector-ref bag 3))
+
+(define(bag-wait-time! bag t)
+  (vector-set! bag 1 t))
+
+
+(define(bag-update-lst! bag lst)
+  (let (( old-l (bag-update-lst bag)))
+    (vector-set! bag 2 (append lst old-l))))
+
+(define (reset-update-lst! bag)
+  (vector-set! bag 2 '()))
+
+(define(bag-wait-delay! bag t)
+  (vector-set! bag 3 t))
+
+(define (reset-wait-delay! bag)
+  (vector-set! bag 3 0))
+
+(define WAIT_DELAY_TIME 15)
+
+(define (time-to-check-delay? bag)
+  (define t (bag-wait-check-delay bag))
+  (if (= t WAIT_DELAY_TIME)
+      (begin (display "time-to-check-delay!")
+             (reset-wait-delay! bag)
+             #t)
+      (begin (bag-wait-delay! bag (+ t 1 ))
+             #f)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define LOCO_WAIT_TIME 30)
+
+(define (update-time bag)
+  (let ((time  (bag-wait-time bag)))
+    (bag-wait-time! bag (+ time 1))))
+
+(define (loco-done-waiting? bag)
+  (let ((time  (bag-wait-time bag)))
+    (= time LOCO_WAIT_TIME)))
+
+(define (reset-time bag)
+  (bag-wait-time! bag 0))
+        
+;;queue of locos that are involved in a traject
+(define locos-active-queue (q:new))
+
+;this table has an entry for each loco. Each entry holds a todo for a loco
+(define todo-table (tb:make-table))
+(define (get-todo loco-id)
+  (tb:table-get-element todo-table loco-id))
+
+  
+(define (update-todo loco-id new-todo)
+  (tb:table-add-element todo-table loco-id new-todo))
+
+(define (get-traject loco-id)
+  (td:todo-content (bag-traject (td:todo-content (get-todo loco-id)))))
+
+
+
+
+(define FILE_NAME "../Simulator/be_simple.txt")
+
+(define safety-msg 'check-safety)
+(define (safety-msg? msg)
+  (eq? msg safety-msg))
+
+(define dont-add-msg 'dont-add)
+(define (dont-add-msg? msg)
+  (eq? msg dont-add-msg))
+
+(define LOOP_WAIT_TIME 0.1)
+
+(define LOOP_THREAD '())
+
+
+
+
+(define (new-controller rwm infrabel simulation?)
+
+  
+  (define (set-up)
+    (cc:start-connection simulation?)
+    (lc:use-simulation! simulation?)
+    (tc:use-simulation! simulation?)
+    (sc:initiate-safety rwm) ;hq to return a list of what he updated!
+    (set! LOOP_THREAD (thread update-loop))
+    )
+
+  (define (new-traject traject)
+    (let*((todo (td:new-todo safety-msg (make-bag traject)))
+          (loco-id (tj:traject-loco traject)))
+      (displayln "controller:new traject added:")
+      (tj:display-traject traject)
+      (newline)
+      (update-todo loco-id todo)
+      (q:enqueue! locos-active-queue (rw:get-loco rwm loco-id))))
+  
+
+  (define (update-loop)
+    (unless (q:empty? locos-active-queue)
+      (let* ((loco (q:serve! locos-active-queue))
+             (loco-id (loco 'get-id))
+             (todo (get-todo loco-id))
+             (msg  (td:todo-msg todo))
+             (bag (td:todo-content todo))
+             (traject (bag-traject bag))
+             (send-update-msg? #f))
+
+        
+        
+        (case msg
+
+          ;this case is when safety is checked to see if a loco can start rolling or continue rolling
+          [(check-safety) (let((response (handle-safety (sc:check-safety dispatch rwm traject) rwm traject loco bag)))
+                            (displayln (string-append "CONCLUSION:"
+                                                      (symbol->string response)))
+                            (set! msg response)
+                            (set! send-update-msg? #t))]
+
+
+          ;this case is when a loco is moving.
+          [(rolling) (let ((response (handle-moving-loco rwm loco traject bag)))
+                       (set! msg response))]
+
+          ;this case is when there is a delay with the hardware loco.
+          [(delay-hardware)  (let ((response (handle-delay-hardware msg rwm traject loco bag)))
+                               (when (safety-msg? response)
+                                 (set! send-update-msg? #t))
+                               (set! msg response))]
+
+          
+          
+          ;This case is when a loco enters a track that isn't a detection
+          [(track-reached)  (let ((response (handle-track-reached rwm traject loco bag)))
+                              (set! msg  response)
+                              (set! send-update-msg? #t)
+                              )]
+
+          ;This case is when a loco enters a track that is a detection
+          [(detection-reached) (let ((response (handle-detection-reached rwm traject loco bag)))
+                                 (set! msg response)
+                                 (set! send-update-msg? #t)
+                                 )]
+
+          ;this case is when a loco has to wait until the tracks that he has to use are free.
+          [(wait) (let ((response (handle-waiting-loco msg bag)))
+                    (set! msg response))]
+
+
+          
+          
+          ;this case is when a loco finished his traject
+          [(destination-reached) (let ((response (handle-destination-reached msg rwm traject loco bag)))
+                                   (when (dont-add-msg? response)
+                                     (set! send-update-msg? #t))
+                                   (set! msg response)
+                                   )])
+        
+;        (when  send-update-msg?
+;          ((infrabel 'send-update-message) (bag-update-lst bag))
+;          (reset-update-lst! bag))
+        
+        (update-todo loco-id (td:new-todo msg bag))
+
+        (unless (dont-add-msg? msg)
+          (q:enqueue! locos-active-queue loco))))
+    
+    (sleep LOOP_WAIT_TIME)
+    (update-loop))
+  
+  (define (stop-connection)
+    (kill-thread LOOP_THREAD)
+    (cc:stop-connection))
+  
+  (define (dispatch cmd)
+    (cond ((eq? cmd 'new-traject) new-traject)
+          ((eq? cmd 'locos-active-queue) locos-active-queue)
+          ((eq? cmd 'get-todo) get-todo)
+          ((eq? cmd 'update-todo) update-todo)
+          ((eq? cmd 'get-traject) get-traject)
+          ((eq? cmd 'close) (stop-connection))
+          ((eq? cmd 'done?) (q:empty? locos-active-queue)) 
+          (else (error "unknown cmd-- Controller: " cmd))))
+  (set-up)
+  dispatch)
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;HULP PROCEDURES;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The procedures below will handle every type of todo ex.: moving a loco, checking and update safety
+;;
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (handle-moving-loco rwm loco traject bag)
+  (let(( response (lc:displace-loco loco traject)))
+    (if (time-to-check-delay? bag)
+        (let ((det-id (sc:loco-logic-delay? traject)))
+          (if det-id
+            (begin (lc:stop-loco-hardware loco)
+                   (tc:correct-delay! rwm loco traject det-id sc:update-signals)
+                   (if (tj:traject-done? traject)
+                       dont-add-msg
+                       safety-msg)
+                   )
+            response))
+        response)))
+
+(define (handle-delay-hardware msg rwm traject loco bag)
+  (if (sc:loco-hardware-delay? traject)
+      msg
+      (begin (displayln "handle-delay-hardware:there is no hardware delay anymore")
+             (bag-update-lst! bag (append  (list loco) (sc:update-signals rwm traject)))
+             safety-msg)))
+
+(define (handle-waiting-loco msg bag)
+  (if (loco-done-waiting? bag)
+      (begin (reset-time bag)
+             safety-msg)
+      (begin (update-time bag)
+             msg)))
+
+(define (handle-track-reached rwm traject loco bag)
+  (tc:reached-new-track rwm traject) 
+  (bag-update-lst! bag (append  (list loco) (sc:update-signals rwm traject)))
+  lc:rolling-msg)
+
+(define (handle-detection-reached rwm traject loco bag)
+  (tc:reached-new-detection rwm traject)
+  (let* ((current (tj:current-track traject))
+         (safety-detection (eq? (tj:backtracking? traject) (current 'get-id))))
+              
+    (when safety-detection
+      (displayln "handle-detection-reached:loco backtracked until safety detection.")
+      (tj:normal-traject! traject)
+      (displayln "handle-detection-reached: Now we see if we stop logic loco or hardware or both")
+      (bag-update-lst! bag (append (list loco) (sc:update-signals-reverse-traject rwm traject)))
+      )
+      
+      )
+    safety-msg)
+
+(define (handle-destination-reached msg rwm traject loco bag)
+            (displayln "handle-destination-reached: traject done")
+            (if (sc:loco-hardware-delay? traject)
+                msg
+                (begin (displayln "handle-destination-reached:delay between hardware loco and logic loco corrected")
+                       (lc:stop-loco loco)
+                       (unless (tj:traject-done? traject)
+                         (tc:reached-new-track rwm traject))
+                       (bag-update-lst! bag (append (list loco) (sc:update-signals rwm traject)))
+                       dont-add-msg)))
+
+(define (handle-safety msg rwm traject loco bag)
+  (display "handle-safety: safety conclusion for loco ")
+  (displayln (loco 'get-id))
+  (displayln msg)
+;  
+;  (when (tj:change-direction-loco? loco traject)
+;    (lc:stop-loco loco)
+;    (sleep 3)
+;    )
+;  
+  (cond ((sc:safe-msg? msg) (bag-update-lst! bag (cons loco (sc:update-signals rwm traject)))
+                            (tc:reserve-until-detection! rwm traject)
+                            (when (tj:change-direction-loco? loco traject)
+                              (lc:stop-loco loco)
+                              (sleep 3))
+                            (lc:start-loco loco traject)
+                            lc:rolling-msg)
+        
+        ((sc:wait-msg? msg) (lc:stop-loco loco)
+                            (bag-update-lst! bag (cons loco (sc:update-signals rwm traject)))
+                            msg)
+        
+        ((sc:deadlock-msg? msg) (lc:stop-loco loco)
+                                (tj:backtracking! traject (get-traject ((tj:next-detection traject) 'reserved-by)))
+                                (bag-update-lst! bag (sc:update-signals-reverse-traject rwm traject))
+                                safety-msg)
+        
+        ((sc:delay-hardware-msg? msg) (displayln "handle-safety:hardware delay detected anymore")
+                                      (lc:stop-loco-logic loco)          
+                                      msg)))

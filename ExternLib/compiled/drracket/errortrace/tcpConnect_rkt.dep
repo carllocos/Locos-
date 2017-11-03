@@ -1,0 +1,1 @@
+("6.10" ("e8e84389a7654394dcdd53e2348a423ada165052" . "918871c74c8937bc5539f8e2c5531f48338d9cbd") (collects #"Fase1" #"MyLib" #"tcpServer.rkt") (collects #"errortrace" #"errortrace-key.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt") (collects #"racket" #"tcp.rkt"))

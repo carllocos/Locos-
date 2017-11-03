@@ -1,0 +1,59 @@
+#lang racket
+
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*                                                                 *-*-
+;-*-*              Single Source Shortest Path Algorithms             *-*-
+;-*-*                                                                 *-*-
+;-*-*                       Wolfgang De Meuter                        *-*-
+;-*-*                 2008 Programming Technology Lab                 *-*-
+;-*-*                   Vrije Universiteit Brussel                    *-*-
+;-*-*                                                                 *-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+;-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+
+(require (prefix-in pq: Project/ExternLib/modifiable-heap))
+(require (prefix-in g: Project/ExternLib/box-weighted-graph))
+(provide dijkstra)
+
+
+(define set-cdr! set-mcdr!)
+(define cons mcons)
+(define car mcar)
+(define cdr mcdr)
+ 
+ (define (relax! distances how-to-reach u v weight)
+   (when (< (+ (vector-ref distances u) weight)
+            (vector-ref distances v))
+     (vector-set! distances v (+ (vector-ref distances u) weight))
+     (vector-set! how-to-reach v u)))
+ 
+ 
+ (define (dijkstra g source) ; only works for positive weights
+   (define distances (make-vector (g:order g) +inf.0))
+   (define how-to-reach (make-vector (g:order g) '()))
+   (define pq-ids (make-vector (g:order g) '()))
+   (define (track-ids id node distance)
+     (vector-set! pq-ids node id))
+   (define (id-of node)
+     (vector-ref pq-ids node))
+   (define pq (pq:new (g:order g) <))
+   (vector-set! distances source 0)
+   (g:for-each-node
+    g
+    (lambda (node box)
+      (pq:enqueue! pq node +inf.0 track-ids))) 
+   (pq:reschedule! pq (id-of source) 0 track-ids)
+   (let loop
+     ((node&distance (pq:serve! pq track-ids)))
+     (let ((from (car node&distance))
+           (distance (cdr node&distance)))
+       (g:for-each-edge
+        g
+        from
+        (lambda (to box weight) 
+          (relax! distances how-to-reach from to weight) 
+          (pq:reschedule! pq (id-of to) (vector-ref distances to) track-ids))))
+     (unless (pq:empty? pq)
+       (loop (pq:serve! pq track-ids))))
+   how-to-reach)

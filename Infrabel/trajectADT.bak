@@ -1,0 +1,367 @@
+#lang racket
+
+(require (prefix-in rs: Project/Infrabel/railsADT))
+(require (prefix-in rwm: Project/Infrabel/railwaymodel))
+(require (prefix-in p: Project/MyLib/package))
+
+
+(provide new-traject
+         current-track
+         next-track
+         previous-track
+         traject-loco
+         next-detection
+         previous-detection
+         prev-prev-detection
+
+
+         advance-until-condition        
+         tracks-until-condition
+         
+         backtracking?
+         traject-done?
+         traject-almost-done?
+         traject-contains?
+         change-direction-loco?
+
+         advance!
+         next-detection!
+         previous-detection!
+         backtracking!
+         normal-traject!
+
+
+
+         display-traject
+
+         )
+
+
+
+
+(define head-size 6)
+
+(define traject-label 'traject)
+
+(define (traject? any)
+  (and (vector? any)
+       (eq? (vector-ref any 0) traject-label)))
+
+(define (new-traject loco-id list-tracks rwm)
+  (define list-tracks-objects (map (lambda (t)
+                                     (rwm:get-track rwm  (p:track-n1 t) (p:track-n2 t)))
+                                   list-tracks))
+  (define tj (list->vector (append (list traject-label loco-id #f #f #f head-size) list-tracks-objects)))
+  (next-detection! tj)
+  tj)
+
+
+
+(define (traject-loco traject)
+  (vector-ref traject 1))
+
+(define (previous-detection traject)
+  (vector-ref traject 2))
+
+(define (previous-detection! traject detection)
+
+  (define prev (previous-detection traject))
+  (when prev
+    (newline)
+    (display "prev-detection for loco ")
+    (display (traject-loco traject))
+    (display " has been changed:")
+    (newline)
+    (display " from: ")
+    (display ( prev'get-id-n1))
+    (display "->")
+    (display (prev 'get-id-n2))
+    (newline)
+    (display " to: ")
+    (display (detection 'get-id-n1))
+    (display "->")
+    (display (detection 'get-id-n2))
+    (newline))
+  (vector-set! traject 2 detection))
+
+;;Wrong it returns the prev detection and not the prev-prev detection
+(define (prev-prev-detection traject)
+  (let* ((ctr 0)
+         (bt? (backtracking? traject))
+         (current (current-track traject))
+         (current-id (if (rs:detection-type? current)
+                         (current 'get-id)
+                         #f)))
+    (for-each-track-at-pos traject
+                           (lambda(index)
+                             (if bt?
+                                 (+ index)
+                                 (- index 1)))
+                           (get-position traject)
+                           (lambda(track)
+                             (if (and (when (and (rs:detection-type? track)
+                                                 (not (eq? (track 'get-id) current-id)))
+                                        (set! ctr (+ ctr 1))
+                                        #t)
+                                      (= ctr 2))
+                                 #t
+                                 #f)))))
+        
+
+(define (next-detection traject)
+  (vector-ref traject 3))
+
+(define (next-detection! traject)
+  (define detection (calculate-next-detection traject))
+  (define next (next-detection traject))
+
+  (when next
+    (newline)
+    (display "next-detection for loco ")
+    (display (traject-loco traject))
+    (display " has been changed:")
+    (newline)
+    (display " from: ")
+    (display (next 'get-id-n1))
+    (display "->")
+    (display (next 'get-id-n2))
+    (newline)
+    (display " to: ")
+    (if detection 
+        (begin (display (detection 'get-id-n1))
+               (display "->")
+               (display (detection 'get-id-n2))
+               (display "  reserved by:")
+               (display (detection 'reserver)))
+        (display "no next detection. We reached last track of traject, we reuse the last track as next"))
+    (newline))
+  (if detection
+      (vector-set! traject 3 detection)
+      (vector-set! traject 3 next)))
+
+(define(backtracking? traject)
+  (vector-ref traject 4))
+
+(define (normal-traject! traject)
+  (inverse-traject traject)
+  (vector-set! traject 4 #f))
+
+;;Backtracking! will initiate everything so that a loco can backtrack to safety. By doing the following:
+;;1. procedure finds the last common-detection edge between the other loco's traject and current-loco's traject. We mark this detection
+;; edge for the securitycontrol
+;;2. procedure finds the detection track where the current loco will have to wait savely until the other loco passes the common-detection
+;;3. procedure chnages the traject direction
+(define (get-position-of-detection traject start-index stop-condition )
+  (define index #f)
+  (for-each-track-at-pos traject
+                         (lambda(i)
+                           (let((next-i (incr-index i)))
+                             (set! index next-i)
+                             next-i))
+                         start-index
+                         stop-condition))
+
+(define (backtracking! current-traject other-traject)
+  (inverse-traject current-traject)
+  (define secure-detection (next-detection current-traject))
+  (define index-current (get-position-of-detection current-traject
+                                                   (get-position current-traject)
+                                                   rs:detection-type?))
+  (define index-other (get-position-of-detection other-traject
+                                                 (get-position other-traject)
+                                                 (lambda(t)
+                                                   (and (rs:detection-type? t)
+                                                        (eq? (t 'get-id) (secure-detection 'get-id))))))
+  (define forCurrent #t)
+  (define forOther #f)
+
+  ;;the hulp procedure will find the next detection starting from start-index.
+  ;if boolean true we will update index-current otherwise index-other
+  (define (hulp traject start-index current?)
+    
+    (for-each-track-at-pos traject
+                           (lambda(i)
+                             (let((next-i (incr-index i)))
+                               (if current?
+                                   (set! index-current next-i)
+                                   (set! index-other next-i))
+                               next-i))
+                           start-index
+                           rs:detection-type?))
+  
+  (let loop ((last-common-detection (current-track current-traject))
+             (secure-detection (hulp current-traject (get-position current-traject) forCurrent)))
+    (when (not secure-detection)
+      (error "backtracking failed, loco of current traject can't backtrack more than where he started."))
+    (let ((next-other-det  (hulp other-traject index-other forOther)))
+      (if (eq? (secure-detection 'get-id) (next-other-det 'get-id))
+          (loop secure-detection
+                (hulp current-traject index-current forCurrent))
+          (begin ((last-common-detection 'backtrack-use!) (traject-loco other-traject))
+                 (vector-set! current-traject 4 (secure-detection 'get-id)))))))
+
+(define (get-position traject)
+  (vector-ref traject 5))
+
+(define (advance! traject)
+  (vector-set! traject 5 (incr-index (get-position traject) traject)))
+
+
+(define (current-track traject)
+  (define pos (get-position traject))
+  (if (correct-index? pos traject)           
+      (vector-ref traject pos)
+      #f))
+
+(define (next-track traject)
+  (define pos (incr-index (get-position traject) traject))
+  (if (correct-index? pos traject)
+      (vector-ref traject pos)
+      #f))
+
+(define (previous-track traject)
+  (define pos (decr-index (get-position traject) traject))
+  (if (correct-index? pos traject)
+      (vector-ref traject pos)
+      #f))
+
+(define (get-track traject pos)
+  (if (correct-index? pos traject)
+      (vector-ref traject pos)
+      #f))
+
+(define (traject-done? traject)
+  (= (+ (get-position traject) 1) (vector-length traject)))
+
+(define(traject-almost-done? traject)
+  (= ( + (get-position traject) 2) (vector-length traject)))
+
+(define (traject-contains? trajec-L2 detection-L1)
+  (advance-until-condition trajec-L2 (lambda(track)
+                                       (and (rs:detection-type? track)
+                                            (eq? (track 'get-id) (detection-L1 'get-id))))))
+(define (change-direction-loco? loco traject)
+  (newline)
+  (display "change direction loco? ")
+  (displayln (string-append "logic loco position"
+                            (symbol->string (loco 'get-id-n1))
+                            " - "
+                            (symbol->string (loco 'get-id-n2))))
+  (let ((n-t (next-track traject))
+        (p-t (previous-track traject)))
+    (and p-t
+         (rs:same-track? n-t p-t))))
+             
+;  (let* ((c-t (current-track traject))
+;         (n-t (next-track traject))
+;         (p-t (previous-track traject))
+;         (switch? (and p-t
+;                       (rs:switch-type? c-t)
+;                       (rs:switch-type? n-t)
+;                       (rs:switch-type? p-t)))
+;         (switch (and switch? (rwm:get-switch rwm (rs:node-in-common c-t p-t)))))
+;    (if switch
+;        (let*((pos-c ((switch 'which-track) c-t))
+;              (pos-n ((switch 'which-track) n-t))
+;              (pos-p ((switch 'which-track) p-t))
+;              (change? (and (= pos-c 0)
+;                            (or (and pos-n pos-p (= pos-n 2) (= pos-p 1))
+;                                (and pos-n pos-p (= pos-n 1) (= pos-p 2))))))
+;          (display change?)
+;          (newline)
+;          change?)
+;        #f)))
+
+;this returns a list of all tracks until the condition is reached
+(define (tracks-until-condition tj cond)
+  (define index (get-position tj))
+  (let loop ((result '()) (i index))
+    (let (( t (get-track tj i)))
+      (if t
+          (if (cond t)
+              (reverse result)
+              (loop (cons t result) (incr-index i tj)))
+          (error "tracks-until-condition error the index is out out bound maybe wrong condition the condition ")))))
+                    
+  
+;hulprprocedures
+
+
+(define (calculate-next-detection traject)
+  (next-detection-starting-from traject
+                                (incr-index (get-position traject) traject)))
+  
+(define (advance-until-condition traject stop-condition)
+  (for-each-track-at-pos traject
+                         (lambda(index)
+                           (incr-index index traject))
+                         (get-position traject)
+                         stop-condition))
+
+(define (next-detection-starting-from traject start-index)
+  (for-each-track-at-pos traject
+                         (lambda(index)
+                           (incr-index index traject))
+                         start-index
+                         rs:detection-type?))
+
+(define (for-each-track-at-pos traject icre/decr start-index stop-condition)
+  (let loop ((index start-index))
+    (if (correct-index? index traject)
+        (if (stop-condition (get-track traject index))
+            (get-track traject index)
+            (loop (icre/decr index)))
+        #f)))
+
+(define(incr-index index traject)
+  (if (backtracking? traject)
+      (- index 1)
+      (+ index 1)))
+
+(define(decr-index index traject)
+  (if (backtracking? traject)
+      (+ index 1)
+      (- index 1)))
+
+(define (correct-index? index traject)
+  (and (< index (vector-length traject))
+       (>= index head-size)))
+
+;;will dissapear: only used by display-traject can be removed
+(define (for-each-track traject f)
+  (define bt? (backtracking? traject))
+  (let loop ((index (if bt?
+                        (- (vector-length traject) 1)
+                        head-size)))
+    (when (correct-index? index traject)
+      (f (get-track traject index))
+      (if bt?
+          (loop (- index 1))
+          (loop (+ 1 index))))))
+
+
+
+(define (inverse-traject traject)
+  (let((prev-detection (previous-detection traject)))
+    (vector-set! traject 2 (next-detection traject))
+    (vector-set! traject 3 prev-detection)))
+
+
+;;Will disapear
+(define(display-traject traject)
+  (display "traject for loco ")
+  (display (traject-loco traject))
+  (display ": ")
+  (newline)
+  (display "  ")
+  (for-each-track traject
+                 (lambda(track)
+                   (display (track 'get-id-n1))
+                   (display " ")
+                   (display (track 'get-type))
+                   (display " ")
+                   (display (track 'get-id-n2))
+                   (display " ")
+                   )
+                 )
+  (newline))

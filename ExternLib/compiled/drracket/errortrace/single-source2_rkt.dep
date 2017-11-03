@@ -1,0 +1,1 @@
+("6.4" ("5b9cd6e5ed77c010e997264740698a7434950f63" . "cbab8e46436b68193a87f7e04c2620bd0aa58226") (collects #"Fase1" #"MyLib" #"box-weighted-graph.rkt") (collects #"Fase1" #"MyLib" #"modifiable-heap.rkt") (collects #"errortrace" #"errortrace-key.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

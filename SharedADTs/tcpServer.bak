@@ -1,0 +1,67 @@
+#lang racket
+
+
+(require (prefix-in tcp: racket/tcp))
+
+(provide newTCPListener
+         port-nr)
+
+(define port-nr 300)
+
+;client represents infrabel. Whenever the server gets a message he will inform infrabel
+(define (newTCPListener client)
+  
+  (define listener '())
+  (define in '())
+  (define out '())
+  (define closed? #f)
+  
+  (define (init-listining)
+    (displayln "server: server is listening...")
+    (set! listener (tcp:tcp-listen port-nr 4 #t))
+    (define-values (input output) (tcp:tcp-accept listener))
+    (set! in input)
+    (set! out output)
+    (displayln "server: received one connection request.")
+    )
+
+  (define (send-package package)
+    (unless closed?
+      (displayln "server: sending package to client:")
+      ;(displayln package)
+      (write package out)
+      (flush-output out)
+      (displayln "server: package sended")
+      ))
+    
+  (define (close)
+    (displayln "sever listen thread: closing server...")
+    (close-input-port in)
+    (close-output-port out)
+    (tcp-close listener)
+    (set! closed? #t)
+    (displayln "sever listen thread: server and ports closed..."))
+
+  (define (listen-loop)
+   (unless closed?
+      (displayln "server listen thread: is waiting for input of client....")
+      (define t (read in))
+      (displayln "sever listen thread: received input from client...")
+      (displayln t)
+      (if (eof-object? t)
+        (begin (close)
+               (client 'close))
+        (begin ((client 'handle-received-package) t)
+               (listen-loop)))
+      ;(sleep 5)
+      )
+    
+    )
+  
+  (define (dispatch cmd)
+    (cond((eq? cmd 'send-package) send-package)
+         ((eq? cmd 'init-listining) (init-listining))
+         ((eq? cmd 'listen-loop) listen-loop)
+         ((eq? cmd 'close) (close))
+         (else (error "unknown cmd- server" cmd))))
+  dispatch)

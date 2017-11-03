@@ -1,0 +1,161 @@
+#lang racket
+
+(require (prefix-in cc: Fase1/Infrabel/commandControl))
+
+;(require (prefix-in m: Fase1/Infrabel/railwaymodel))
+(require (prefix-in tj: Fase1/NMBS/trajectADT))
+(require (prefix-in rs: Fase1/Infrabel/railsADT))
+;(require (prefix-in l: Fase1/Infrabel/locoADT))
+
+(provide start-loco
+         stop-loco
+         displace-loco
+         use-simulation!
+         
+         loco-rolling?
+         track-reached?
+         detection-reached?
+         destination-reached?
+         
+         rolling-msg
+         track-msg
+         detection-msg
+         destination-msg
+         
+         stop-loco-logic
+         stop-loco-hardware
+         )
+
+(define simulation? #t)
+
+(define Max-speed-simulation 1)
+(define start-speed-simulation 0.90)
+(define turbo 5)
+
+(define Max-speed-hardware 125)
+(define start-speed-hardware 70)
+
+(define stop-speed 0)
+
+(define (use-simulation! val)
+  (set! simulation? val))
+
+(define rolling-msg 'rolling)
+(define track-msg 'track-reached)
+(define detection-msg 'detection-reached)
+(define destination-msg 'destination-reached)
+
+(define (loco-rolling? msg)
+  (eq? msg track-msg))
+
+(define (track-reached? msg)
+  (eq? msg rolling-msg))
+
+(define (detection-reached? msg)
+  (eq? msg detection-msg))
+
+(define (destination-reached? msg)
+  (eq? msg destination-msg))
+
+
+;;this is only called when we reach a new-track/new-detection/destination
+(define (derive-msg traject current-track next-track)
+  (if (rs:detection-type? next-track)
+      (if (tj:traject-almost-done? traject)
+          destination-msg
+          detection-msg)
+      track-msg))
+
+(define (next-node n1 n2 next-track)
+  (if (eq? n2 (next-track 'get-id-n1))
+      (next-track 'get-id-n2)
+      (next-track 'get-id-n1)))
+
+(define (displace-loco loco traject)
+  (let*([loop-virtual-time 1.0]  ;change?
+         [forward? (>= (loco 'get-speed) 0)]
+         [dx (* (abs (loco 'get-speed)) loop-virtual-time)]
+         [next-track? #f])
+    ; displacing to next track
+    (let while ()
+
+      (define tlen ((tj:current-track traject) 'get-length))
+      (unless (< dx (if forward?
+                        (- tlen (loco 'get-distance))
+                        (loco 'get-distance)))
+        (set! next-track? #t)
+   
+        (define n1 (loco 'get-id-n1))
+        (define n2 (loco 'get-id-n2))
+        (define n3 (if forward?
+                       (next-node n1 n2 (tj:next-track traject))
+                       (next-node n2 n1 (tj:next-track traject))))
+     
+        (set! dx (- dx (if forward?
+                           (- tlen (loco 'get-distance))
+                           (loco 'get-distance))))
+        
+        ((loco 'set-id-n1!) (if forward? n2 n3))
+        ((loco 'set-id-n2!) (if forward? n3 n1))
+        ((loco 'set-distance!)(if forward? 0 ((tj:next-track traject) 'get-length)))
+        (while)))
+    ; displacement within track length
+
+   
+    (define d1 (loco 'get-distance))
+    (define d2 (if forward? (+ d1 dx) (- d1 dx)))
+    (define n-t (tj:next-track traject))
+    (define current (tj:current-track traject))
+
+    ((loco 'set-distance!)d2)
+
+    (when next-track?
+      (displayln (string-append "displace-loco-logic: Loco "
+                                (symbol->string (loco 'get-id))
+                                " new-track reached. oriented "
+                                (symbol->string (loco 'get-id-n1))
+                                " - "
+                                (symbol->string (loco 'get-id-n2))))
+      )
+    (if next-track?
+        (derive-msg traject current (tj:next-track traject))
+        rolling-msg)))
+
+
+(define (derive-speed loco traject)
+  (let*((current-track (tj:current-track traject))
+        (next-track (tj:next-track traject))
+        (n-id (rs:node-in-common current-track next-track))
+        (loco-n1 (eq? n-id (loco 'get-id-n1)))
+        (speed (if simulation? start-speed-simulation start-speed-hardware)))
+    (if loco-n1
+        (* -1 speed)
+        speed)))
+
+
+(define (stop-loco loco)
+  (displayln (string-append "stop-loco: Loco " (symbol->string (loco 'get-id)) " has been stopped"))
+ 
+  (unless (= stop-speed (loco 'get-speed))
+    (cc:stop-loco (loco 'get-id))
+    ((loco 'set-speed!) stop-speed)))
+
+(define (stop-loco-logic loco)
+  (displayln (string-append "stop-loco-logic: Loco " (symbol->string (loco 'get-id)) " has been stopped"))
+  ((loco 'set-speed!) stop-speed))
+
+(define (stop-loco-hardware loco)
+  (displayln (string-append "stop-loco-hardware: Loco " (symbol->string (loco 'get-id)) " has been stopped"))
+  (cc:stop-loco (loco 'get-id)))
+    
+
+(define (start-loco loco traject)
+    (let ((speed (derive-speed loco traject))
+          (current-speed (loco 'get-speed)))
+      (displayln (string-append "start-loco: Loco " (symbol->string (loco 'get-id)) " is started with speed" (number->string speed) ))
+      ;(unless (= speed current-speed)
+      ((loco 'set-speed!) (if simulation?
+                              (* turbo speed)
+                              speed))
+   ;   ((loco 'set-speed!) speed)
+      (cc:start-loco (loco 'get-id) speed)))

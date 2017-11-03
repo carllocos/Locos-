@@ -1,0 +1,61 @@
+#lang racket
+
+
+(require (prefix-in tcp: racket/tcp))
+(require (prefix-in ser: Project/MyLib/tcpServer))
+
+
+
+
+(provide newTCPConnection)
+
+;client is a reference to nmbs
+(define (newTCPConnection client)
+  
+  (define listener '())
+  (define in '())
+  (define out '())
+
+  (define (init-connection)
+    (displayln "client: connecting with Server..")
+    (define-values (intp outp) (tcp:tcp-connect "localhost" ser:port-nr))
+    (display "client: connection with Server made.")
+    (set! in intp)
+    (set! out outp)
+    )
+
+  (define (receive-package)
+    (displayln "client listen thread: is waiting for input of server....")
+    (define packet (read in))
+    (displayln "client listen thread: received input from server...")
+    (displayln packet)
+    packet
+    ;(listen-loop)
+    )
+    
+    
+
+;  (define (receive-package)
+;    ((client 'handle-received-package) (read in)))
+
+  (define (send-package package)
+    (displayln "client:sending package to server")
+    (displayln package)
+    (write package out) 
+    (flush-output out)
+    (displayln "client:package send"))
+    
+
+  (define (close)
+    (displayln "client: closing ports")
+    (close-input-port in)
+    (close-output-port out)
+    (displayln "client: ports closed. Tcp connection to server closed!"))
+  
+  (define (dispatch cmd)
+    (cond((eq? cmd 'send-package) send-package)
+         ((eq? cmd 'init-connection) (init-connection))
+         ((eq? cmd 'close) (close))
+         ((eq? cmd 'receive-package) (receive-package))
+         (else (error "unknown cmd- server" cmd))))
+  dispatch)

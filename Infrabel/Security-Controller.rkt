@@ -1,0 +1,206 @@
+#lang racket
+
+(require (prefix-in rs: Project/SharedADTs/railsADT))
+(require (prefix-in rwm: Project/SharedADTs/railwaymodelADT))
+(require (prefix-in tj: Project/Infrabel/trajectADT))
+(require (prefix-in cc: Project/Infrabel/commandControl))
+(require (prefix-in d: Project/Infrabel/TodoADT))
+
+(provide update-signals
+         check-safety
+         initiate-signals
+         
+         loco-hardware-delay?
+         loco-logic-delay?
+       
+         )
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; They are three situations where we update signals and one where we dont do anything
+;;
+;; 1) When a loco enters a track that isn't of the type detection and the previous track is a detection.
+;;
+;;    prev-prev-detection                   prev-track - detection      current - not detection
+;;  n1--------------------n2............. nt----------------------nt+1--------------------------nt+2.......................
+;;
+;; We need to make the previous detection orange and the prev-prev detection green. (done by procedure scenario A)
+;;
+
+;; 2)  When a loco enters a track that is of the type detection and the previous track is not a detection.
+;;
+;;       prev-detection                       prev-track - not a detection         current - detection
+;;  n1--------------------n2............. nt--------------------------------nt+1--------------------------nt+2.......................
+;; 
+;; Current track will become red (done by procedure scenario-B)
+;;
+;;
+;; 3)  When a loco enters a track that is of the type detection and the previous track is also a detection type
+;;
+;;       prev-detection                       prev-track - not a detection         current - detection
+;;  n1--------------------n2............. nt--------------------------------nt+1--------------------------nt+2.......................
+;;
+;; Done by update-scenario-C. That is a combination of scenario-A and B.
+;;
+;; 4) Wen a loco enters a track (not a detection) and the previous is also not a detection
+;;
+;;
+;;       prev-detection                       prev-track - not a detection         current - not detection
+;;  n1--------------------n2............. nt--------------------------------nt+1----------------------------nt+2.......................
+;;
+;; Nothing has to be updated here
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(define (update-signals rwm traject)
+(let ((current-t (tj:current-track traject))
+      (prev-t (tj:previous-track traject)))
+  (if (not (rs:detection-type? current-t))
+      (when (and prev-t
+                 (rs:detection-type? prev-t))
+        (update-scenario-A rwm prev-t (tj:prev-prev-detection traject)))
+      (if (not (rs:detection-type? prev-t))
+          (update-scenario-B rwm current-t)
+          (update-scenario-C rwm current-t prev-t (tj:prev-prev-detection traject))))
+  (when (tj:traject-done? traject)
+    (signal-green! rwm (tj:previous-detection traject)))))
+  
+;this procedure is called AFTER we change the direction of the traject. To update the signals of the new next- and previous-detection 
+(define (update-signals-reverse-traject rwm traject)
+  (let ((next-detection (tj:next-detection traject))
+        (prev-detection (tj:previous-detection traject)))
+
+    (signal-status rwm
+                   next-detection
+                   (lambda(signal)
+                     (signal 'orange?))
+                   (lambda(signal)
+                     (signal 'green!)))
+    
+    (signal-status rwm
+                   prev-detection
+                   (lambda(signal)
+                     (signal 'green?))
+                   (lambda(signal)
+                     (signal 'orange!)))))
+
+(define (check-safety controller rwm traject)
+  
+  (if (loco-hardware-delay? traject)
+      d:delay-hardware-msg
+      (check-security-tracks controller rwm traject)))
+
+(define (initiate-signals rwm)
+  (let loop ((locos (rwm:get-list-locos rwm)))
+    (when (not (null? locos))
+      (let* ((loco (car locos))
+             (detection (rwm:get-track rwm (loco 'get-id-n1) (loco 'get-id-n2))))
+        (signal-red! rwm detection)
+        (loop (cdr locos))))))
+
+
+;checks if the hardware loco has a delay
+(define (loco-hardware-delay? traject)
+  (define current-t (tj:current-track traject))
+  (let*((current (if (rs:detection-type? current-t)
+                     current-t
+                     (tj:next-track traject)))
+        (logic-id (current 'get-id))
+        (hardware-id (cc:get-detection-loco (tj:traject-loco traject))))
+    (if hardware-id
+        (not (eq? hardware-id logic-id))
+        #t)))
+
+
+;checks if the logic loco has a delay
+(define (loco-logic-delay? traject)
+  (let ((hardware-id (cc:get-detection-loco (tj:traject-loco traject)))
+        (c-t (tj:current-track traject))
+        (n-d (tj:next-detection traject)))
+    (and n-d
+         (and (eq? (n-d 'get-id) hardware-id)
+              hardware-id))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Hulp Procedures;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;   
+    
+    
+(define (check-security-tracks controller rwm  traject)
+  (define l-id (tj:traject-loco traject))
+  (define current (tj:current-track traject))
+  (define next-detection (tj:next-detection traject))
+  (define prev-t #f)
+
+ ;test if all tracks until next detection is not reserved
+  (define next-det (tj:member-current-pos traject
+                                            (lambda(t)
+                                              (let ((result #f)
+                                                    (s (rwm:switch? rwm prev-t t)))
+                                                (cond (s    (if (or (s 'free?)
+                                                                    (eq? (s 'reserved-by?) l-id))
+                                                                (set! result #f)
+                                                                (set! result #t)))
+                                                       
+                                                      ((rs:detection-type? t) (if (rs:same-track? t current) (set! result #f) (set! result #t)))
+                                                      (else (if (or (t 'free?)
+                                                                    ((t 'reserved-by?) l-id))
+                                                                (set! result #f)
+                                                                (set! result #t))))
+                                                (set! prev-t t)
+                                                result))))
+  
+  (if (and (rs:detection-type? next-det)
+           (or (next-det 'free?)
+               ((next-det 'reserved-by?) l-id)))
+      d:safe-msg
+      d:wait-msg))
+
+
+
+(define (update-scenario-A rwm prev-detection prev-prev-detection)
+  
+  (when prev-detection
+    (signal-orange! rwm prev-detection))
+  (when prev-prev-detection
+    (signal-status rwm
+                   prev-prev-detection
+                   (lambda(signal)
+                     (signal 'orange?))
+                   (lambda(signal)
+                     (signal 'green!)))))
+
+(define (update-scenario-B rwm current-detection)
+  (signal-red! rwm current-detection))
+
+(define (update-scenario-C rwm current-detection prev-detection prev-prev-detection)
+  (update-scenario-B rwm current-detection)
+  (update-scenario-A rwm prev-detection prev-prev-detection))
+
+
+;updates the signal associated to an detection track
+(define (signal-orange! rwm detection-edge)
+  (signal-status rwm
+                 detection-edge
+                 (lambda(signal)
+                   (not (signal 'orange?)))
+                 (lambda( signal)
+                   (signal 'orange!))))
+
+(define (signal-green! rwm detection-edge)
+  (signal-status rwm
+                 detection-edge
+                 (lambda(signal)
+                   (not (signal 'green?)))
+                 (lambda( signal)
+                   (signal 'green!))))
+
+(define (signal-red! rwm detection-edge)
+  (signal-status rwm
+                 detection-edge
+                 (lambda(signal)
+                   (not (signal 'red?)))
+                 (lambda( signal)
+                   (signal 'red!))))
+
+
+(define (signal-status rwm detection-edge condition status)
+  (let ((signal (rwm:get-signal rwm (detection-edge 'get-id))))
+    (when (condition signal)
+      (status signal))))

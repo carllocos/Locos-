@@ -1,0 +1,16 @@
+L 5 Lg Bx
+
+N Lg 300 700
+N Bx 100 700
+N Mx 600 700
+N Wz 800 700
+N A1 1000 600
+N A2 1000 800
+N C 1300 600
+
+T Lg Mx
+
+D 1 Bx Lg
+D 2 A1 C
+
+S Wz Mx A1 A2

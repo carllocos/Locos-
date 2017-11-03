@@ -1,0 +1,73 @@
+#lang racket
+(require (prefix-in udp: Fase1/Infrabel/UDP))
+(provide start-loco
+         stop-loco
+         increase-speed
+         decrease-speed
+         start-connection
+         change-switch!
+         stop-connection
+         get-detection-loco
+         )
+
+;;;NEEDS TO DISAPEAR
+
+(define (stop-connection)
+  (udp:stop-connection))
+
+(define (start-connection)
+  (udp:connect-with-Z21))
+
+;;;Commands and control for Loco
+;(define start-speed 5)
+;(define max-speed 20)
+(define stop-speed 0)
+
+(define (start-loco loco-id speed)
+  (udp:change-loco-speed loco-id speed))
+
+(define (stop-loco loco-id)
+  (udp:change-loco-speed loco-id stop-speed))
+
+(define(get-loco-speed loco-id)
+  (udp:loco-speed loco-id))
+
+(define (increase-speed loco-id)
+  (udp:change-loco-speed loco-id (+ (get-loco-speed loco-id) 1)))
+
+(define (decrease-speed loco-id)
+  (udp:change-loco-speed loco-id (- (get-loco-speed loco-id) 1)))
+
+;(define (increase-speed loco-id)
+;  (let((speed (get-loco-speed loco-id))
+;       (speed-positive? ))
+;    (if speed-positive?
+;        (when (< (+ speed 1) max-speed)
+;          (udp:change-loco-speed loco-id (+ speed 1)))
+;        (when (< (* -1 max-speed) (- speed 1))
+;          (udp:change-loco-speed loco-id (+ speed 1))))))
+
+;(define (decrease-speed loco-id)
+;  (let((speed (get-loco-speed loco-id)))
+;    (when (> (- speed 1) stop-speed)
+;      (udp:change-loco-speed loco-id (- speed 1)))))
+
+
+;;;CHANGE DIRECTION NEEDS STILL TO BE THOUGHT Trhough
+;(define (change-loco-direction loco-id)
+;  (let* ((speed (get-loco-speed loco-id))
+;         (new-speed (if (> speed stop-speed)
+;                        )
+
+;;;;;;SWITCHS
+(define status-one 1)
+(define status-two 2)
+
+(define (change-switch! switch-id)
+  (let((status (udp:get-switch-status switch-id)))
+    (if (= status status-two)
+        (udp:change-switch-status switch-id status-one)
+        (udp:change-switch-status switch-id status-two))))
+
+;(define (get-switch-status id)
+;  (udp:get-switch-status id))
