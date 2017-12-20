@@ -6,4 +6,4 @@ The GUI could have been better but this is not one of the main goals of the proj
 
 The only remark that I got during my project defence is that. The GUI instantiation has to be separated of NMBS.
 
-Documentation is also proided in the project folder.
+Documentation is also provided in the project folder.
